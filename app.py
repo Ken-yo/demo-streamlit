@@ -93,9 +93,7 @@ def init_db() -> None:
 def insert_records(
     department: str,
     employee_name: str,
-    target_year: int,
-    period: str,
-    rows: list[dict[str, str]],
+    rows: list[dict[str, Any]],
 ) -> int:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     actor = employee_name
@@ -106,8 +104,8 @@ def insert_records(
             (
                 department,
                 employee_name,
-                target_year,
-                period,
+                int(row.get("target_year", datetime.now().year)),
+                clean_text(row.get("period", "")) or PERIOD_OPTIONS[0],
                 row.get("record_label", ""),
                 row.get("tableau", ""),
                 row.get("rpa", ""),
@@ -124,7 +122,7 @@ def insert_records(
 
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        cur = conn.executemany(
+        conn.executemany(
             """
             INSERT INTO course_records (
                 department,
@@ -144,9 +142,14 @@ def insert_records(
             """,
             values,
         )
-        first_id = cur.lastrowid
         # sqlite3.executemany() can return None for lastrowid depending on Python/SQLite.
-        inserted_ids = [row["id"] for row in conn.execute("SELECT id FROM course_records ORDER BY id DESC LIMIT ?", (len(values),)).fetchall()]
+        inserted_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM course_records ORDER BY id DESC LIMIT ?",
+                (len(values),),
+            ).fetchall()
+        ]
         for record_id in inserted_ids:
             conn.execute(
                 """
@@ -169,12 +172,10 @@ def fetch_records() -> pd.DataFrame:
                 employee_name,
                 target_year,
                 period,
-                record_label,
                 tableau,
                 rpa,
                 db_engineer,
                 pro,
-                memo,
                 created_by,
                 created_at
             FROM course_records
@@ -191,12 +192,10 @@ def fetch_records() -> pd.DataFrame:
                 "名前",
                 "年",
                 "時期",
-                "件名/No",
                 "Tableau",
                 "RPA",
                 "DBエンジニア",
                 "プロ",
-                "メモ",
                 "登録者",
                 "登録日時",
             ]
@@ -210,12 +209,10 @@ def fetch_records() -> pd.DataFrame:
             "employee_name": "名前",
             "target_year": "年",
             "period": "時期",
-            "record_label": "件名/No",
             "tableau": "Tableau",
             "rpa": "RPA",
             "db_engineer": "DBエンジニア",
             "pro": "プロ",
-            "memo": "メモ",
             "created_by": "登録者",
             "created_at": "登録日時",
         }
@@ -227,12 +224,10 @@ def fetch_records() -> pd.DataFrame:
             "名前",
             "年",
             "時期",
-            "件名/No",
             "Tableau",
             "RPA",
             "DBエンジニア",
             "プロ",
-            "メモ",
             "登録者",
             "登録日時",
         ]
@@ -253,16 +248,14 @@ def fetch_detail_records() -> pd.DataFrame:
                         "名前": row["名前"],
                         "年": row["年"],
                         "時期": row["時期"],
-                        "件名/No": row["件名/No"],
                         "コース": course,
                         "入力された情報": value,
-                        "メモ": row["メモ"],
                         "登録日時": row["登録日時"],
                     }
                 )
     return pd.DataFrame(
         detail_rows,
-        columns=["ID", "部署", "名前", "年", "時期", "件名/No", "コース", "入力された情報", "メモ", "登録日時"],
+        columns=["ID", "部署", "名前", "年", "時期", "コース", "入力された情報", "登録日時"],
     )
 
 
@@ -327,14 +320,12 @@ def style_sheet_as_table(ws, table_name: str) -> None:
         "C": 18,
         "D": 8,
         "E": 10,
-        "F": 18,
+        "F": 26,
         "G": 26,
-        "H": 26,
-        "I": 28,
-        "J": 26,
-        "K": 28,
-        "L": 16,
-        "M": 20,
+        "H": 28,
+        "I": 26,
+        "J": 16,
+        "K": 20,
     }
     for col_idx in range(1, max_col + 1):
         col_letter = get_column_letter(col_idx)
@@ -413,29 +404,37 @@ def clean_text(value: Any) -> str:
     return str(value).strip()
 
 
-def make_default_input_df() -> pd.DataFrame:
+def make_default_input_df(default_year: int, default_period: str) -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"件名/No": "", "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": "", "メモ": ""},
-            {"件名/No": "", "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": "", "メモ": ""},
-            {"件名/No": "", "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": "", "メモ": ""},
+            {"年": default_year, "時期": default_period, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
+            {"年": default_year, "時期": default_period, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
+            {"年": default_year, "時期": default_period, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
         ]
     )
 
 
-def normalize_input_rows(input_df: pd.DataFrame) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
+def normalize_input_rows(input_df: pd.DataFrame) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for idx, row in input_df.iterrows():
         values = {COURSE_TO_DB[course]: clean_text(row.get(course, "")) for course in COURSE_COLUMNS}
-        record_label = clean_text(row.get("件名/No", "")) or f"明細{idx + 1}"
-        memo = clean_text(row.get("メモ", ""))
+        target_year = int(row.get("年", datetime.now().year) or datetime.now().year)
+        period = clean_text(row.get("時期", "")) or PERIOD_OPTIONS[0]
 
         has_any_course_value = any(values.values())
         if not has_any_course_value:
-            # コース入力がない行は登録しない。件名やメモだけの行も対象外。
+            # コース入力がない行は登録しない。
             continue
 
-        rows.append({"record_label": record_label, **values, "memo": memo})
+        rows.append(
+            {
+                "target_year": target_year,
+                "period": period,
+                "record_label": f"明細{idx + 1}",
+                **values,
+                "memo": "",
+            }
+        )
     return rows
 
 
@@ -460,32 +459,37 @@ def get_excel_bytes() -> bytes | None:
 
 def page_input() -> None:
     st.subheader("入力")
-    st.caption("1人につき複数件を登録できます。各行が1件、各列がコース別の入力欄です。")
+    st.caption("1人につき複数件を登録できます。各行が1件、年・時期・各コースをテーブル内で入力します。")
 
     with st.form("entry_form", clear_on_submit=False):
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2 = st.columns(2)
         with col1:
             department = st.text_input("部署", placeholder="例：IT / 人事 / 生産")
         with col2:
             employee_name = st.text_input("名前", placeholder="例：山田 太郎")
-        with col3:
-            target_year = st.number_input("年", min_value=2000, max_value=2100, value=datetime.now().year, step=1)
-        with col4:
-            period = st.selectbox("時期", PERIOD_OPTIONS, index=0)
 
         st.markdown("#### コース別入力テーブル")
         edited_df = st.data_editor(
-            make_default_input_df(),
+            make_default_input_df(datetime.now().year, PERIOD_OPTIONS[0]),
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True,
             column_config={
-                "件名/No": st.column_config.TextColumn("件名/No", help="複数件を区別する任意の名称または番号"),
+                "年": st.column_config.NumberColumn(
+                    "年",
+                    min_value=2000,
+                    max_value=2100,
+                    step=1,
+                    format="%d",
+                ),
+                "時期": st.column_config.SelectboxColumn(
+                    "時期",
+                    options=PERIOD_OPTIONS,
+                ),
                 "Tableau": st.column_config.TextColumn("Tableau"),
                 "RPA": st.column_config.TextColumn("RPA"),
                 "DBエンジニア": st.column_config.TextColumn("DBエンジニア"),
                 "プロ": st.column_config.TextColumn("プロ"),
-                "メモ": st.column_config.TextColumn("メモ"),
             },
         )
 
@@ -503,7 +507,7 @@ def page_input() -> None:
             st.warning("登録対象の行がありません。Tableau / RPA / DBエンジニア / プロ のいずれかに入力してください。")
             return
 
-        saved_count = insert_records(department, employee_name, int(target_year), period, rows)
+        saved_count = insert_records(department, employee_name, rows)
         excel_path = sync_excel_from_sqlite()
         st.success(f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}")
         st.info("同じ人でも、次回の確定で別件として追加登録されます。")
