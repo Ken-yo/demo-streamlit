@@ -482,9 +482,46 @@ def get_excel_bytes() -> bytes | None:
     return EXCEL_PATH.read_bytes()
 
 
+def reset_input_table_state() -> None:
+    """Reset only the course input table to its default single-row state."""
+    current_year = datetime.now().year
+    st.session_state.input_row_count = 1
+
+    # Clear all existing row widget values, including rows that are no longer displayed.
+    prefixes = (
+        "input_year_",
+        "input_period_",
+        "input_tableau_",
+        "input_rpa_",
+        "input_db_engineer_",
+        "input_pro_",
+    )
+    for key in list(st.session_state.keys()):
+        if key.startswith(prefixes):
+            del st.session_state[key]
+
+    # Set the first row back to the default values.
+    st.session_state.input_year_0 = current_year
+    st.session_state.input_period_0 = None
+    st.session_state.input_tableau_0 = ""
+    st.session_state.input_rpa_0 = ""
+    st.session_state.input_db_engineer_0 = ""
+    st.session_state.input_pro_0 = ""
+
+
 def page_input() -> None:
     st.subheader("入力")
     st.caption("1人につき複数件を登録できます。各行が1件、年・時期・各コースをテーブル内で入力します。")
+
+    if st.session_state.pop("reset_input_table_after_save", False):
+        reset_input_table_state()
+
+    success_message = st.session_state.pop("entry_success_message", "")
+    info_message = st.session_state.pop("entry_info_message", "")
+    if success_message:
+        st.success(success_message)
+    if info_message:
+        st.info(info_message)
 
     current_year = datetime.now().year
     if "input_row_count" not in st.session_state:
@@ -597,8 +634,10 @@ def page_input() -> None:
 
         saved_count = insert_records(department, employee_name, rows)
         excel_path = sync_excel_from_sqlite()
-        st.success(f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}")
-        st.info("同じ人でも、次回の確定で別件として追加登録されます。")
+        st.session_state.entry_success_message = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
+        st.session_state.entry_info_message = "テーブル入力をデフォルト状態に戻しました。必要に応じて次の入力を行ってください。"
+        st.session_state.reset_input_table_after_save = True
+        st.rerun()
 
 
 def page_summary() -> None:
@@ -677,7 +716,7 @@ def page_admin() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, page_icon="📊", layout="wide")
+    st.set_page_config(page_title=APP_TITLE, page_icon="📊", layout="wide", initial_sidebar_state="collapsed")
     init_db()
 
     st.title(APP_TITLE)
