@@ -15,8 +15,8 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 APP_TITLE = "社内コース入力・集計システム"
-COURSE_COLUMNS = ["Tableau", "RPA", "DBエンジニア", "プロ"]
-COURSE_TO_DB = {"Tableau": "tableau", "RPA": "rpa", "DBエンジニア": "db_engineer", "プロ": "pro"}
+COURSE_COLUMNS = ["Tableau", "RPA", "ビジネスコア", "DBエンジニア", "プロ"]
+COURSE_TO_DB = {"Tableau": "tableau", "RPA": "rpa", "ビジネスコア": "business_core", "DBエンジニア": "db_engineer", "プロ": "pro"}
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "course_entries.db"))
@@ -105,6 +105,12 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def ensure_column_exists(conn: sqlite3.Connection, table_name: str, column_name: str, column_definition: str) -> None:
+    existing_columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    if column_name not in existing_columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.execute("""
@@ -117,6 +123,7 @@ def init_db() -> None:
                 record_label TEXT DEFAULT '',
                 tableau REAL DEFAULT 0,
                 rpa REAL DEFAULT 0,
+                business_core REAL DEFAULT 0,
                 db_engineer REAL DEFAULT 0,
                 pro REAL DEFAULT 0,
                 memo TEXT DEFAULT '',
@@ -139,6 +146,7 @@ def init_db() -> None:
                 record_label TEXT DEFAULT '',
                 tableau REAL DEFAULT 0,
                 rpa REAL DEFAULT 0,
+                business_core REAL DEFAULT 0,
                 db_engineer REAL DEFAULT 0,
                 pro REAL DEFAULT 0,
                 memo TEXT DEFAULT '',
@@ -153,6 +161,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_deleted_course_records_original_id
             ON deleted_course_records(original_id)
         """)
+        ensure_column_exists(conn, "course_records", "business_core", "REAL DEFAULT 0")
+        ensure_column_exists(conn, "deleted_course_records", "business_core", "REAL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,7 +182,7 @@ def make_default_input_df() -> pd.DataFrame:
     for fixed in FIXED_INPUT_ROWS:
         rows.append({
             "年": fixed["年"], "時期": fixed["時期"],
-            "Tableau": 0, "RPA": 0, "DBエンジニア": 0, "プロ": 0,
+            "Tableau": 0, "RPA": 0, "ビジネスコア": 0, "DBエンジニア": 0, "プロ": 0,
         })
     return pd.DataFrame(rows)
 
@@ -212,7 +222,7 @@ def insert_records(department: str, comment: str, rows: list[dict[str, Any]]) ->
     actor = department
     values = [(
         department, employee_name, int(row["target_year"]), clean_text(row["period"]), row.get("record_label", ""),
-        row.get("tableau", 0), row.get("rpa", 0), row.get("db_engineer", 0), row.get("pro", 0),
+        row.get("tableau", 0), row.get("rpa", 0), row.get("business_core", 0), row.get("db_engineer", 0), row.get("pro", 0),
         comment, actor, now,
     ) for row in rows]
     if not values:
@@ -222,8 +232,8 @@ def insert_records(department: str, comment: str, rows: list[dict[str, Any]]) ->
         conn.executemany("""
             INSERT INTO course_records (
                 department, employee_name, target_year, period, record_label,
-                tableau, rpa, db_engineer, pro, memo, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, values)
         inserted_ids = [row["id"] for row in conn.execute(
             "SELECT id FROM course_records ORDER BY id DESC LIMIT ?", (len(values),)
@@ -246,7 +256,7 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(f"""
             SELECT id, department, employee_name, target_year, period, record_label,
-                   tableau, rpa, db_engineer, pro, memo, created_by, created_at
+                   tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at
             FROM course_records
             WHERE id IN ({placeholders})
             ORDER BY id
@@ -255,12 +265,12 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
             conn.execute("""
                 INSERT INTO deleted_course_records (
                     original_id, department, employee_name, target_year, period, record_label,
-                    tableau, rpa, db_engineer, pro, memo, created_by, created_at,
+                    tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at,
                     deleted_by, delete_comment, deleted_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 row["id"], row["department"], row["employee_name"], row["target_year"], row["period"], row["record_label"],
-                row["tableau"], row["rpa"], row["db_engineer"], row["pro"], row["memo"], row["created_by"], row["created_at"],
+                row["tableau"], row["rpa"], row["business_core"], row["db_engineer"], row["pro"], row["memo"], row["created_by"], row["created_at"],
                 deleted_by, delete_comment, now,
             ))
             conn.execute("""
@@ -274,10 +284,10 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
 
 
 def fetch_records() -> pd.DataFrame:
-    columns = ["ID", "部署", "年", "時期", "Tableau", "RPA", "DBエンジニア", "プロ", "コメント", "登録者", "登録日時"]
+    columns = ["ID", "部署", "年", "時期", "Tableau", "RPA", "ビジネスコア", "DBエンジニア", "プロ", "コメント", "登録者", "登録日時"]
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT id, department, target_year, period, tableau, rpa, db_engineer, pro, memo, created_by, created_at
+            SELECT id, department, target_year, period, tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at
             FROM course_records
             ORDER BY target_year ASC, CASE period WHEN '上期' THEN 1 WHEN '下期' THEN 2 ELSE 9 END ASC, id ASC
         """).fetchall()
@@ -285,7 +295,7 @@ def fetch_records() -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame([dict(row) for row in rows]).rename(columns={
         "id": "ID", "department": "部署", "target_year": "年", "period": "時期",
-        "tableau": "Tableau", "rpa": "RPA", "db_engineer": "DBエンジニア", "pro": "プロ",
+        "tableau": "Tableau", "rpa": "RPA", "business_core": "ビジネスコア", "db_engineer": "DBエンジニア", "pro": "プロ",
         "memo": "コメント", "created_by": "登録者", "created_at": "登録日時",
     })
     df = df[columns]
@@ -308,12 +318,12 @@ def fetch_detail_records() -> pd.DataFrame:
 
 def fetch_deleted_records() -> pd.DataFrame:
     columns = [
-        "削除履歴ID", "元ID", "部署", "年", "時期", "Tableau", "RPA", "DBエンジニア", "プロ",
+        "削除履歴ID", "元ID", "部署", "年", "時期", "Tableau", "RPA", "ビジネスコア", "DBエンジニア", "プロ",
         "登録時コメント", "登録者", "登録日時", "削除者", "削除コメント", "削除日時",
     ]
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT deleted_id, original_id, department, target_year, period, tableau, rpa, db_engineer, pro,
+            SELECT deleted_id, original_id, department, target_year, period, tableau, rpa, business_core, db_engineer, pro,
                    memo, created_by, created_at, deleted_by, delete_comment, deleted_at
             FROM deleted_course_records
             ORDER BY deleted_at DESC, deleted_id DESC
@@ -322,7 +332,7 @@ def fetch_deleted_records() -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame([dict(row) for row in rows]).rename(columns={
         "deleted_id": "削除履歴ID", "original_id": "元ID", "department": "部署", "target_year": "年", "period": "時期",
-        "tableau": "Tableau", "rpa": "RPA", "db_engineer": "DBエンジニア", "pro": "プロ", "memo": "登録時コメント",
+        "tableau": "Tableau", "rpa": "RPA", "business_core": "ビジネスコア", "db_engineer": "DBエンジニア", "pro": "プロ", "memo": "登録時コメント",
         "created_by": "登録者", "created_at": "登録日時", "deleted_by": "削除者", "delete_comment": "削除コメント", "deleted_at": "削除日時",
     })
     df = df[columns]
@@ -351,7 +361,7 @@ def style_sheet_as_table(ws, table_name: str) -> None:
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.freeze_panes = "A2"
-    widths = {"A": 12, "B": 12, "C": 18, "D": 8, "E": 10, "F": 26, "G": 26, "H": 28, "I": 26, "J": 30, "K": 16, "L": 20, "M": 16, "N": 30, "O": 20}
+    widths = {"A": 12, "B": 12, "C": 18, "D": 8, "E": 10, "F": 26, "G": 26, "H": 18, "I": 28, "J": 26, "K": 30, "L": 16, "M": 20, "N": 16, "O": 30, "P": 20}
     for col_idx in range(1, max_col + 1):
         col_letter = get_column_letter(col_idx)
         ws.column_dimensions[col_letter].width = widths.get(col_letter, 18)
@@ -462,7 +472,7 @@ def page_input() -> None:
     )
 
     st.markdown("#### コース別入力テーブル")
-    st.caption("年・時期は固定表示です。Tableau / RPA / DBエンジニア / プロ は数値で入力してください。")
+    st.caption("年・時期は固定表示です。Tableau / RPA / ビジネスコア / DBエンジニア / プロ は数値で入力してください。")
     version = st.session_state["input_editor_version"]
     edited_df = st.data_editor(
         make_default_input_df(),
@@ -476,6 +486,7 @@ def page_input() -> None:
             "時期": st.column_config.TextColumn("時期"),
             "Tableau": st.column_config.NumberColumn("Tableau", min_value=0, step=1, format="%d"),
             "RPA": st.column_config.NumberColumn("RPA", min_value=0, step=1, format="%d"),
+            "ビジネスコア": st.column_config.NumberColumn("ビジネスコア", min_value=0, step=1, format="%d"),
             "DBエンジニア": st.column_config.NumberColumn("DBエンジニア", min_value=0, step=1, format="%d"),
             "プロ": st.column_config.NumberColumn("プロ", min_value=0, step=1, format="%d"),
         },
