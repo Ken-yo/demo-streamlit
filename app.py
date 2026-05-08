@@ -14,15 +14,15 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-APP_TITLE = "社内コース入力・集計システム"
-COURSE_COLUMNS = ["Tableau", "RPA", "ビジネスコア", "DBエンジニア", "プロ"]
-COURSE_TO_DB = {"Tableau": "tableau", "RPA": "rpa", "ビジネスコア": "business_core", "DBエンジニア": "db_engineer", "プロ": "pro"}
+APP_TITLE = "集計システム"
+COURSE_COLUMNS = ["ビジネスコア", "プロ", "データエンジニア", "Tableau", "RPA"]
+COURSE_TO_DB = {"ビジネスコア": "business_core", "プロ": "pro", "データエンジニア": "data_engineer", "Tableau": "tableau", "RPA": "rpa"}
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "course_entries.db"))
 EXCEL_PATH = Path(os.getenv("EXCEL_PATH", DATA_DIR / "course_entries.xlsx"))
 EXPORT_LOCK = threading.Lock()
-DEPARTMENT_OPTIONS = ["(HB企)", "(HB技)", "(MR)", "(HB制振)", "(FR)", "(生活インフラ)", "(加)"]
+DEPARTMENT_OPTIONS = ["A", "B", "C", "D", "E", "F", "G"]
 FIXED_INPUT_ROWS = [
     {"年": 2026, "時期": "上期"}, {"年": 2026, "時期": "下期"},
     {"年": 2027, "時期": "上期"}, {"年": 2027, "時期": "下期"},
@@ -182,7 +182,7 @@ def make_default_input_df() -> pd.DataFrame:
     for fixed in FIXED_INPUT_ROWS:
         rows.append({
             "年": fixed["年"], "時期": fixed["時期"],
-            "Tableau": 0, "RPA": 0, "ビジネスコア": 0, "DBエンジニア": 0, "プロ": 0,
+            "ビジネスコア": 0, "プロ": 0, "データエンジニア": 0, "Tableau": 0, "RPA": 0,
         })
     return pd.DataFrame(rows)
 
@@ -284,10 +284,10 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
 
 
 def fetch_records() -> pd.DataFrame:
-    columns = ["ID", "部署", "年", "時期", "Tableau", "RPA", "ビジネスコア", "DBエンジニア", "プロ", "コメント", "登録者", "登録日時"]
+    columns = ["ID", "部署", "年", "時期", "ビジネスコア", "プロ", "データエンジニア", "Tableau", "RPA", "コメント", "登録者", "登録日時"]
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT id, department, target_year, period, tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at
+            SELECT id, department, target_year, period, business_core, pro, data_engineer, tableau, rpa, memo, created_by, created_at
             FROM course_records
             ORDER BY target_year ASC, CASE period WHEN '上期' THEN 1 WHEN '下期' THEN 2 ELSE 9 END ASC, id ASC
         """).fetchall()
@@ -295,7 +295,7 @@ def fetch_records() -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame([dict(row) for row in rows]).rename(columns={
         "id": "ID", "department": "部署", "target_year": "年", "period": "時期",
-        "tableau": "Tableau", "rpa": "RPA", "business_core": "ビジネスコア", "db_engineer": "DBエンジニア", "pro": "プロ",
+        "business_core": "ビジネスコア", "pro": "プロ", "data_engineer": "データエンジニア", "tableau": "Tableau", "rpa": "RPA",
         "memo": "コメント", "created_by": "登録者", "created_at": "登録日時",
     })
     df = df[columns]
@@ -318,7 +318,7 @@ def fetch_detail_records() -> pd.DataFrame:
 
 def fetch_deleted_records() -> pd.DataFrame:
     columns = [
-        "削除履歴ID", "元ID", "部署", "年", "時期", "Tableau", "RPA", "ビジネスコア", "DBエンジニア", "プロ",
+        "削除履歴ID", "元ID", "部署", "年", "時期", "ビジネスコア", "プロ", "データエンジニア", "Tableau", "RPA",
         "登録時コメント", "登録者", "登録日時", "削除者", "削除コメント", "削除日時",
     ]
     with get_conn() as conn:
@@ -332,7 +332,7 @@ def fetch_deleted_records() -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame([dict(row) for row in rows]).rename(columns={
         "deleted_id": "削除履歴ID", "original_id": "元ID", "department": "部署", "target_year": "年", "period": "時期",
-        "tableau": "Tableau", "rpa": "RPA", "business_core": "ビジネスコア", "db_engineer": "DBエンジニア", "pro": "プロ", "memo": "登録時コメント",
+        "business_core": "ビジネスコア", "pro": "プロ", "data_engineer": "データエンジニア", "tableau": "Tableau", "rpa": "RPA", "memo": "登録時コメント",
         "created_by": "登録者", "created_at": "登録日時", "deleted_by": "削除者", "delete_comment": "削除コメント", "deleted_at": "削除日時",
     })
     df = df[columns]
@@ -472,7 +472,7 @@ def page_input() -> None:
     )
 
     st.markdown("#### コース別入力テーブル")
-    st.caption("年・時期は固定表示です。Tableau / RPA / ビジネスコア / DBエンジニア / プロ は数値で入力してください。")
+    st.caption("年・時期は固定表示です。ビジネスコア / プロ / データエンジニア / Tableau / RPA は数値で入力してください。")
     version = st.session_state["input_editor_version"]
     edited_df = st.data_editor(
         make_default_input_df(),
@@ -484,11 +484,11 @@ def page_input() -> None:
         column_config={
             "年": st.column_config.NumberColumn("年", format="%d"),
             "時期": st.column_config.TextColumn("時期"),
+            "ビジネスコア": st.column_config.NumberColumn("ビジネスコア", min_value=0, step=1, format="%d"),
+            "プロ": st.column_config.NumberColumn("プロ", min_value=0, step=1, format="%d"),
+            "データエンジニア": st.column_config.NumberColumn("データエンジニア", min_value=0, step=1, format="%d"),
             "Tableau": st.column_config.NumberColumn("Tableau", min_value=0, step=1, format="%d"),
             "RPA": st.column_config.NumberColumn("RPA", min_value=0, step=1, format="%d"),
-            "ビジネスコア": st.column_config.NumberColumn("ビジネスコア", min_value=0, step=1, format="%d"),
-            "DBエンジニア": st.column_config.NumberColumn("DBエンジニア", min_value=0, step=1, format="%d"),
-            "プロ": st.column_config.NumberColumn("プロ", min_value=0, step=1, format="%d"),
         },
     )
 
