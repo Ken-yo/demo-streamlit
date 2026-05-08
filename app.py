@@ -521,6 +521,7 @@ def page_input() -> None:
         st.session_state["entry_success_message"] = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
         st.session_state["entry_info_message"] = "登録後、入力テーブルとコメント欄をデフォルトに戻しました。"
         st.rerun()
+        
 
 def page_summary() -> None:
     st.subheader("集計テーブル")
