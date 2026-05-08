@@ -256,7 +256,7 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(f"""
             SELECT id, department, employee_name, target_year, period, record_label,
-                   tableau, rpa, business_core, data_engineer, pro, memo, created_by, created_at
+                   business_core, pro, data_engineer, tableau, rpa, memo, created_by, created_at
             FROM course_records
             WHERE id IN ({placeholders})
             ORDER BY id
