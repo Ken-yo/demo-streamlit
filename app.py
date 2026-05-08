@@ -191,8 +191,8 @@ def normalize_input_rows(input_df: pd.DataFrame, comment: str) -> tuple[list[dic
     errors: list[str] = []
     rows: list[dict[str, Any]] = []
     comment = clean_text(comment)
-    if not comment:
-        errors.append("コメントを入力してください。")
+    # if not comment:
+    #     errors.append("コメントを入力してください。")
     if len(input_df) != len(FIXED_INPUT_ROWS):
         errors.append(f"入力テーブルは{len(FIXED_INPUT_ROWS)}行で登録してください。")
 
@@ -495,11 +495,11 @@ def page_input() -> None:
     st.caption("合計")
     st.dataframe(make_input_total_df(edited_df), use_container_width=True, hide_index=True)
 
-    comment = st.text_area(
-        "コメント",
-        key=f"entry_comment_{version}",
-        placeholder="登録内容に関するコメントを入力してください",
-    )
+    # comment = st.text_area(
+    #     "コメント",
+    #     key=f"entry_comment_{version}",
+    #     placeholder="登録内容に関するコメントを入力してください",
+    # )
     submitted = st.button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
 
     if submitted:
@@ -507,7 +507,7 @@ def page_input() -> None:
         if not department:
             st.error("部署を選択してください。")
             return
-        rows, errors = normalize_input_rows(edited_df, comment)
+        rows, errors = normalize_input_rows(edited_df, comment="")
         if errors:
             st.error("未入力または数値ではない項目があります。すべて数値で入力してから登録してください。")
             for error in errors[:20]:
@@ -515,7 +515,7 @@ def page_input() -> None:
             if len(errors) > 20:
                 st.write(f"- ほか {len(errors) - 20} 件")
             return
-        saved_count = insert_records(department, clean_text(comment), rows)
+        saved_count = insert_records(department, clean_text(comment=""), rows)
         excel_path = sync_excel_from_sqlite()
         reset_input_widgets()
         st.session_state["entry_success_message"] = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
@@ -616,13 +616,13 @@ def main() -> None:
     init_db()
     st.title(APP_TITLE)
     st.caption("Streamlit + SQLite + Excel保存版")
-    menu = st.sidebar.radio("メニュー", ["入力", "集計テーブル", "コース別明細", "データ管理"], index=0)
+    menu = st.sidebar.radio("メニュー", ["入力", "集計テーブル", "データ管理"], index=0)
     if menu == "入力":
         page_input()
     elif menu == "集計テーブル":
         page_summary()
-    elif menu == "コース別明細":
-        page_detail()
+    # elif menu == "コース別明細":
+    #     page_detail()
     else:
         page_admin()
 
