@@ -44,6 +44,57 @@ def clean_text(value: Any) -> str:
     return str(value).strip()
 
 
+def parse_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return None
+        value = value.replace(",", "")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def format_number_for_display(value: float | int) -> float | int:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def convert_course_columns_to_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.copy()
+    for course in COURSE_COLUMNS:
+        if course in df.columns:
+            df[course] = pd.to_numeric(df[course], errors="coerce").fillna(0)
+            df[course] = df[course].map(format_number_for_display)
+    return df
+
+
+def make_input_total_df(input_df: pd.DataFrame) -> pd.DataFrame:
+    total_row: dict[str, Any] = {"年": "", "時期": "合計"}
+    for course in COURSE_COLUMNS:
+        total = pd.to_numeric(input_df.get(course, pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+        total_row[course] = format_number_for_display(total)
+    return pd.DataFrame([total_row], columns=["年", "時期", *COURSE_COLUMNS])
+
+
 def get_conn() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
@@ -64,10 +115,10 @@ def init_db() -> None:
                 target_year INTEGER NOT NULL,
                 period TEXT NOT NULL,
                 record_label TEXT DEFAULT '',
-                tableau TEXT DEFAULT '',
-                rpa TEXT DEFAULT '',
-                db_engineer TEXT DEFAULT '',
-                pro TEXT DEFAULT '',
+                tableau REAL DEFAULT 0,
+                rpa REAL DEFAULT 0,
+                db_engineer REAL DEFAULT 0,
+                pro REAL DEFAULT 0,
                 memo TEXT DEFAULT '',
                 created_by TEXT DEFAULT '',
                 created_at TEXT NOT NULL
@@ -86,10 +137,10 @@ def init_db() -> None:
                 target_year INTEGER NOT NULL,
                 period TEXT NOT NULL,
                 record_label TEXT DEFAULT '',
-                tableau TEXT DEFAULT '',
-                rpa TEXT DEFAULT '',
-                db_engineer TEXT DEFAULT '',
-                pro TEXT DEFAULT '',
+                tableau REAL DEFAULT 0,
+                rpa REAL DEFAULT 0,
+                db_engineer REAL DEFAULT 0,
+                pro REAL DEFAULT 0,
                 memo TEXT DEFAULT '',
                 created_by TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
@@ -121,7 +172,7 @@ def make_default_input_df() -> pd.DataFrame:
     for fixed in FIXED_INPUT_ROWS:
         rows.append({
             "年": fixed["年"], "時期": fixed["時期"],
-            "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": "",
+            "Tableau": 0, "RPA": 0, "DBエンジニア": 0, "プロ": 0,
         })
     return pd.DataFrame(rows)
 
@@ -142,10 +193,13 @@ def normalize_input_rows(input_df: pd.DataFrame, comment: str) -> tuple[list[dic
         row = input_df.iloc[idx]
         target_year = int(fixed["年"])
         period = str(fixed["時期"])
-        values = {COURSE_TO_DB[course]: clean_text(row.get(course, "")) for course in COURSE_COLUMNS}
+        values: dict[str, float | int] = {}
         for course, db_col in COURSE_TO_DB.items():
-            if not values[db_col]:
-                errors.append(f"{idx + 1}行目（{target_year} {period}）の{course}を入力してください。")
+            number = parse_number(row.get(course, None))
+            if number is None:
+                errors.append(f"{idx + 1}行目（{target_year} {period}）の{course}を数値で入力してください。")
+                continue
+            values[db_col] = number
         rows.append({"target_year": target_year, "period": period, "record_label": f"{target_year}_{period}", **values, "memo": comment})
     if errors:
         return [], errors
@@ -158,7 +212,7 @@ def insert_records(department: str, comment: str, rows: list[dict[str, Any]]) ->
     actor = department
     values = [(
         department, employee_name, int(row["target_year"]), clean_text(row["period"]), row.get("record_label", ""),
-        row.get("tableau", ""), row.get("rpa", ""), row.get("db_engineer", ""), row.get("pro", ""),
+        row.get("tableau", 0), row.get("rpa", 0), row.get("db_engineer", 0), row.get("pro", 0),
         comment, actor, now,
     ) for row in rows]
     if not values:
@@ -234,7 +288,8 @@ def fetch_records() -> pd.DataFrame:
         "tableau": "Tableau", "rpa": "RPA", "db_engineer": "DBエンジニア", "pro": "プロ",
         "memo": "コメント", "created_by": "登録者", "created_at": "登録日時",
     })
-    return df[columns]
+    df = df[columns]
+    return convert_course_columns_to_numeric(df)
 
 
 def fetch_detail_records() -> pd.DataFrame:
@@ -242,8 +297,8 @@ def fetch_detail_records() -> pd.DataFrame:
     detail_rows: list[dict[str, Any]] = []
     for _, row in aggregate_df.iterrows():
         for course in COURSE_COLUMNS:
-            value = clean_text(row.get(course, ""))
-            if value:
+            value = parse_number(row.get(course, None))
+            if value is not None:
                 detail_rows.append({
                     "ID": row["ID"], "部署": row["部署"], "年": row["年"], "時期": row["時期"],
                     "コース": course, "入力された情報": value, "コメント": row["コメント"], "登録日時": row["登録日時"],
@@ -270,7 +325,8 @@ def fetch_deleted_records() -> pd.DataFrame:
         "tableau": "Tableau", "rpa": "RPA", "db_engineer": "DBエンジニア", "pro": "プロ", "memo": "登録時コメント",
         "created_by": "登録者", "created_at": "登録日時", "deleted_by": "削除者", "delete_comment": "削除コメント", "deleted_at": "削除日時",
     })
-    return df[columns]
+    df = df[columns]
+    return convert_course_columns_to_numeric(df)
 
 
 def write_dataframe(ws, df: pd.DataFrame) -> None:
@@ -397,29 +453,43 @@ def page_input() -> None:
     if info_message := st.session_state.pop("entry_info_message", ""):
         st.info(info_message)
 
-    with st.form("entry_form", clear_on_submit=False):
-        department = st.selectbox("部署", [""] + DEPARTMENT_OPTIONS, index=0, format_func=lambda value: "選択してください" if value == "" else value)
-        st.markdown("#### コース別入力テーブル")
-        st.caption("年・時期は固定表示です。Tableau / RPA / DBエンジニア / プロ は全セル入力してください。")
-        version = st.session_state["input_editor_version"]
-        edited_df = st.data_editor(
-            make_default_input_df(),
-            key=f"course_input_editor_{version}",
-            num_rows="fixed",
-            use_container_width=True,
-            hide_index=True,
-            disabled=["年", "時期"],
-            column_config={
-                "年": st.column_config.NumberColumn("年", format="%d"),
-                "時期": st.column_config.TextColumn("時期"),
-                "Tableau": st.column_config.TextColumn("Tableau"),
-                "RPA": st.column_config.TextColumn("RPA"),
-                "DBエンジニア": st.column_config.TextColumn("DBエンジニア"),
-                "プロ": st.column_config.TextColumn("プロ"),
-            },
-        )
-        comment = st.text_area("コメント", key=f"entry_comment_{version}", placeholder="登録内容に関するコメントを入力してください")
-        submitted = st.form_submit_button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
+    department = st.selectbox(
+        "部署",
+        [""] + DEPARTMENT_OPTIONS,
+        index=0,
+        format_func=lambda value: "選択してください" if value == "" else value,
+        key="entry_department",
+    )
+
+    st.markdown("#### コース別入力テーブル")
+    st.caption("年・時期は固定表示です。Tableau / RPA / DBエンジニア / プロ は数値で入力してください。")
+    version = st.session_state["input_editor_version"]
+    edited_df = st.data_editor(
+        make_default_input_df(),
+        key=f"course_input_editor_{version}",
+        num_rows="fixed",
+        use_container_width=True,
+        hide_index=True,
+        disabled=["年", "時期"],
+        column_config={
+            "年": st.column_config.NumberColumn("年", format="%d"),
+            "時期": st.column_config.TextColumn("時期"),
+            "Tableau": st.column_config.NumberColumn("Tableau", min_value=0, step=1, format="%d"),
+            "RPA": st.column_config.NumberColumn("RPA", min_value=0, step=1, format="%d"),
+            "DBエンジニア": st.column_config.NumberColumn("DBエンジニア", min_value=0, step=1, format="%d"),
+            "プロ": st.column_config.NumberColumn("プロ", min_value=0, step=1, format="%d"),
+        },
+    )
+
+    st.caption("合計")
+    st.dataframe(make_input_total_df(edited_df), use_container_width=True, hide_index=True)
+
+    comment = st.text_area(
+        "コメント",
+        key=f"entry_comment_{version}",
+        placeholder="登録内容に関するコメントを入力してください",
+    )
+    submitted = st.button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
 
     if submitted:
         department = clean_text(department)
@@ -428,7 +498,7 @@ def page_input() -> None:
             return
         rows, errors = normalize_input_rows(edited_df, comment)
         if errors:
-            st.error("未入力の項目があります。すべて入力してから登録してください。")
+            st.error("未入力または数値ではない項目があります。すべて数値で入力してから登録してください。")
             for error in errors[:20]:
                 st.write(f"- {error}")
             if len(errors) > 20:
@@ -440,7 +510,6 @@ def page_input() -> None:
         st.session_state["entry_success_message"] = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
         st.session_state["entry_info_message"] = "登録後、入力テーブルとコメント欄をデフォルトに戻しました。"
         st.rerun()
-
 
 def page_summary() -> None:
     st.subheader("集計テーブル")
