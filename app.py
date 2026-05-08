@@ -404,26 +404,48 @@ def clean_text(value: Any) -> str:
     return str(value).strip()
 
 
-def make_default_input_df(default_year: int, default_period: str) -> pd.DataFrame:
+def make_default_input_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"年": default_year, "時期": default_period, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
-            {"年": default_year, "時期": default_period, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
-            {"年": default_year, "時期": default_period, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
+            {"年": None, "時期": None, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
+            {"年": None, "時期": None, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
+            {"年": None, "時期": None, "Tableau": "", "RPA": "", "DBエンジニア": "", "プロ": ""},
         ]
     )
 
 
-def normalize_input_rows(input_df: pd.DataFrame) -> list[dict[str, Any]]:
+def parse_input_year(value: Any) -> int | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def normalize_input_rows(input_df: pd.DataFrame) -> tuple[list[dict[str, Any]], list[str]]:
     rows: list[dict[str, Any]] = []
+    errors: list[str] = []
     for idx, row in input_df.iterrows():
         values = {COURSE_TO_DB[course]: clean_text(row.get(course, "")) for course in COURSE_COLUMNS}
-        target_year = int(row.get("年", datetime.now().year) or datetime.now().year)
-        period = clean_text(row.get("時期", "")) or PERIOD_OPTIONS[0]
 
         has_any_course_value = any(values.values())
         if not has_any_course_value:
             # コース入力がない行は登録しない。
+            continue
+
+        target_year = parse_input_year(row.get("年"))
+        period = clean_text(row.get("時期", ""))
+
+        if target_year is None:
+            errors.append(f"{idx + 1}行目の年を入力してください。")
+        if not period:
+            errors.append(f"{idx + 1}行目の時期を選択してください。")
+
+        if target_year is None or not period:
             continue
 
         rows.append(
@@ -435,7 +457,7 @@ def normalize_input_rows(input_df: pd.DataFrame) -> list[dict[str, Any]]:
                 "memo": "",
             }
         )
-    return rows
+    return rows, errors
 
 
 def apply_filters(df: pd.DataFrame, department: str, employee_name: str, target_year: str, period: str) -> pd.DataFrame:
@@ -469,29 +491,82 @@ def page_input() -> None:
             employee_name = st.text_input("名前", placeholder="例：山田 太郎")
 
         st.markdown("#### コース別入力テーブル")
-        edited_df = st.data_editor(
-            make_default_input_df(datetime.now().year, PERIOD_OPTIONS[0]),
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "年": st.column_config.NumberColumn(
-                    "年",
+        st.caption("時期はプルダウンを1回クリックすると選択肢が開きます。")
+
+        row_count = st.number_input(
+            "入力行数",
+            min_value=1,
+            max_value=50,
+            value=3,
+            step=1,
+            help="登録したい明細の行数を指定してください。",
+        )
+
+        header_cols = st.columns([1, 1, 1.25, 1.25, 1.4, 1.25])
+        headers = ["年", "時期", "Tableau", "RPA", "DBエンジニア", "プロ"]
+        for col, header in zip(header_cols, headers):
+            col.markdown(f"**{header}**")
+
+        input_rows: list[dict[str, Any]] = []
+        for row_no in range(int(row_count)):
+            cols = st.columns([1, 1, 1.25, 1.25, 1.4, 1.25])
+            with cols[0]:
+                target_year = st.number_input(
+                    f"年 {row_no + 1}",
                     min_value=2000,
                     max_value=2100,
                     step=1,
+                    value=None,
                     format="%d",
-                ),
-                "時期": st.column_config.SelectboxColumn(
-                    "時期",
-                    options=PERIOD_OPTIONS,
-                ),
-                "Tableau": st.column_config.TextColumn("Tableau"),
-                "RPA": st.column_config.TextColumn("RPA"),
-                "DBエンジニア": st.column_config.TextColumn("DBエンジニア"),
-                "プロ": st.column_config.TextColumn("プロ"),
-            },
-        )
+                    label_visibility="collapsed",
+                    key=f"input_year_{row_no}",
+                )
+            with cols[1]:
+                period = st.selectbox(
+                    f"時期 {row_no + 1}",
+                    PERIOD_OPTIONS,
+                    index=None,
+                    placeholder="選択",
+                    label_visibility="collapsed",
+                    key=f"input_period_{row_no}",
+                )
+            with cols[2]:
+                tableau = st.text_input(
+                    f"Tableau {row_no + 1}",
+                    label_visibility="collapsed",
+                    key=f"input_tableau_{row_no}",
+                )
+            with cols[3]:
+                rpa = st.text_input(
+                    f"RPA {row_no + 1}",
+                    label_visibility="collapsed",
+                    key=f"input_rpa_{row_no}",
+                )
+            with cols[4]:
+                db_engineer = st.text_input(
+                    f"DBエンジニア {row_no + 1}",
+                    label_visibility="collapsed",
+                    key=f"input_db_engineer_{row_no}",
+                )
+            with cols[5]:
+                pro = st.text_input(
+                    f"プロ {row_no + 1}",
+                    label_visibility="collapsed",
+                    key=f"input_pro_{row_no}",
+                )
+
+            input_rows.append(
+                {
+                    "年": target_year,
+                    "時期": period,
+                    "Tableau": tableau,
+                    "RPA": rpa,
+                    "DBエンジニア": db_engineer,
+                    "プロ": pro,
+                }
+            )
+
+        edited_df = pd.DataFrame(input_rows)
 
         submitted = st.form_submit_button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
 
@@ -502,7 +577,11 @@ def page_input() -> None:
             st.error("部署と名前を入力してください。")
             return
 
-        rows = normalize_input_rows(edited_df)
+        rows, errors = normalize_input_rows(edited_df)
+        if errors:
+            for error in errors:
+                st.error(error)
+            return
         if not rows:
             st.warning("登録対象の行がありません。Tableau / RPA / DBエンジニア / プロ のいずれかに入力してください。")
             return
