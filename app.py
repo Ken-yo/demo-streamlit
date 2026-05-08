@@ -161,8 +161,39 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_deleted_course_records_original_id
             ON deleted_course_records(original_id)
         """)
-        ensure_column_exists(conn, "course_records", "business_core", "REAL DEFAULT 0")
-        ensure_column_exists(conn, "deleted_course_records", "business_core", "REAL DEFAULT 0")
+        
+        course_record_columns = {
+        "record_label": "TEXT DEFAULT ''",
+        "business_core": "REAL DEFAULT 0",
+        "pro": "REAL DEFAULT 0",
+        "data_engineer": "REAL DEFAULT 0",
+        "tableau": "REAL DEFAULT 0",
+        "rpa": "REAL DEFAULT 0",
+        "memo": "TEXT DEFAULT ''",
+        "created_by": "TEXT DEFAULT ''",
+    }
+
+    for column_name, column_definition in course_record_columns.items():
+        ensure_column_exists(conn, "course_records", column_name, column_definition)
+
+    deleted_record_columns = {
+        "original_id": "INTEGER DEFAULT 0",
+        "record_label": "TEXT DEFAULT ''",
+        "business_core": "REAL DEFAULT 0",
+        "pro": "REAL DEFAULT 0",
+        "data_engineer": "REAL DEFAULT 0",
+        "tableau": "REAL DEFAULT 0",
+        "rpa": "REAL DEFAULT 0",
+        "memo": "TEXT DEFAULT ''",
+        "created_by": "TEXT DEFAULT ''",
+        "deleted_by": "TEXT DEFAULT ''",
+        "delete_comment": "TEXT DEFAULT ''",
+        "deleted_at": "TEXT DEFAULT ''",
+    }
+
+    for column_name, column_definition in deleted_record_columns.items():
+        ensure_column_exists(conn, "deleted_course_records", column_name, column_definition)
+        
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -222,7 +253,7 @@ def insert_records(department: str, comment: str, rows: list[dict[str, Any]]) ->
     actor = department
     values = [(
         department, employee_name, int(row["target_year"]), clean_text(row["period"]), row.get("record_label", ""),
-        row.get("tableau", 0), row.get("rpa", 0), row.get("business_core", 0), row.get("data_engineer", 0), row.get("pro", 0),
+        row.get("business_core", 0), row.get("pro", 0), row.get("data_engineer", 0), row.get("tableau", 0), row.get("rpa", 0),
         comment, actor, now,
     ) for row in rows]
     if not values:
