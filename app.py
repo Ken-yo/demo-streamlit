@@ -121,11 +121,11 @@ def init_db() -> None:
                 target_year INTEGER NOT NULL,
                 period TEXT NOT NULL,
                 record_label TEXT DEFAULT '',
+                business_core REAL DEFAULT 0,
+                pro REAL DEFAULT 0,
+                data_engineer REAL DEFAULT 0,
                 tableau REAL DEFAULT 0,
                 rpa REAL DEFAULT 0,
-                business_core REAL DEFAULT 0,
-                db_engineer REAL DEFAULT 0,
-                pro REAL DEFAULT 0,
                 memo TEXT DEFAULT '',
                 created_by TEXT DEFAULT '',
                 created_at TEXT NOT NULL
@@ -144,11 +144,11 @@ def init_db() -> None:
                 target_year INTEGER NOT NULL,
                 period TEXT NOT NULL,
                 record_label TEXT DEFAULT '',
+                business_core REAL DEFAULT 0,
+                pro REAL DEFAULT 0,
+                data_engineer REAL DEFAULT 0,
                 tableau REAL DEFAULT 0,
                 rpa REAL DEFAULT 0,
-                business_core REAL DEFAULT 0,
-                db_engineer REAL DEFAULT 0,
-                pro REAL DEFAULT 0,
                 memo TEXT DEFAULT '',
                 created_by TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
@@ -222,7 +222,7 @@ def insert_records(department: str, comment: str, rows: list[dict[str, Any]]) ->
     actor = department
     values = [(
         department, employee_name, int(row["target_year"]), clean_text(row["period"]), row.get("record_label", ""),
-        row.get("tableau", 0), row.get("rpa", 0), row.get("business_core", 0), row.get("db_engineer", 0), row.get("pro", 0),
+        row.get("tableau", 0), row.get("rpa", 0), row.get("business_core", 0), row.get("data_engineer", 0), row.get("pro", 0),
         comment, actor, now,
     ) for row in rows]
     if not values:
@@ -232,7 +232,7 @@ def insert_records(department: str, comment: str, rows: list[dict[str, Any]]) ->
         conn.executemany("""
             INSERT INTO course_records (
                 department, employee_name, target_year, period, record_label,
-                tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at
+                business_core, pro, data_engineer, tableau, rpa, memo, created_by, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, values)
         inserted_ids = [row["id"] for row in conn.execute(
@@ -256,7 +256,7 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
         conn.execute("BEGIN IMMEDIATE")
         rows = conn.execute(f"""
             SELECT id, department, employee_name, target_year, period, record_label,
-                   tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at
+                   tableau, rpa, business_core, data_engineer, pro, memo, created_by, created_at
             FROM course_records
             WHERE id IN ({placeholders})
             ORDER BY id
@@ -265,12 +265,12 @@ def delete_records(record_ids: list[int], delete_comment: str, deleted_by: str =
             conn.execute("""
                 INSERT INTO deleted_course_records (
                     original_id, department, employee_name, target_year, period, record_label,
-                    tableau, rpa, business_core, db_engineer, pro, memo, created_by, created_at,
+                    business_core, pro, data_engineer, tableau, rpa, memo, created_by, created_at,
                     deleted_by, delete_comment, deleted_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 row["id"], row["department"], row["employee_name"], row["target_year"], row["period"], row["record_label"],
-                row["tableau"], row["rpa"], row["business_core"], row["db_engineer"], row["pro"], row["memo"], row["created_by"], row["created_at"],
+                row["business_core"], row["pro"], row["data_engineer"], row["tableau"], row["rpa"], row["memo"], row["created_by"], row["created_at"],
                 deleted_by, delete_comment, now,
             ))
             conn.execute("""
@@ -323,7 +323,7 @@ def fetch_deleted_records() -> pd.DataFrame:
     ]
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT deleted_id, original_id, department, target_year, period, tableau, rpa, business_core, db_engineer, pro,
+            SELECT deleted_id, original_id, department, target_year, period, business_core, pro, data_engineer, tableau, rpa,
                    memo, created_by, created_at, deleted_by, delete_comment, deleted_at
             FROM deleted_course_records
             ORDER BY deleted_at DESC, deleted_id DESC
