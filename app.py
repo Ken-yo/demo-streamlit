@@ -32,6 +32,20 @@ EXCEL_PATH = Path(os.getenv("EXCEL_PATH", DATA_DIR / "course_entries.xlsx"))
 EXPORT_LOCK = threading.Lock()
 
 PERIOD_OPTIONS = ["上期", "下期", "1Q", "2Q", "3Q", "4Q", "通年"]
+DEPARTMENT_OPTIONS = ["(HB企)", "(HB技)", "(MR)", "(HB制振)", "(FR)", "(生活インフラ)", "(加)"]
+FIXED_INPUT_ROWS = [
+    {"年": 2026, "時期": "上期"},
+    {"年": 2026, "時期": "下期"},
+    {"年": 2027, "時期": "上期"},
+    {"年": 2027, "時期": "下期"},
+    {"年": 2028, "時期": "上期"},
+    {"年": 2028, "時期": "下期"},
+    {"年": 2029, "時期": "上期"},
+    {"年": 2029, "時期": "下期"},
+    {"年": 2030, "時期": "上期"},
+    {"年": 2030, "時期": "下期"},
+]
+SYSTEM_EMPLOYEE_NAME = ""
 
 
 # -----------------------------
@@ -92,11 +106,11 @@ def init_db() -> None:
 
 def insert_records(
     department: str,
-    employee_name: str,
     rows: list[dict[str, Any]],
 ) -> int:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    actor = employee_name
+    employee_name = SYSTEM_EMPLOYEE_NAME
+    actor = department
 
     values = []
     for row in rows:
@@ -189,7 +203,6 @@ def fetch_records() -> pd.DataFrame:
             columns=[
                 "ID",
                 "部署",
-                "名前",
                 "年",
                 "時期",
                 "Tableau",
@@ -206,7 +219,6 @@ def fetch_records() -> pd.DataFrame:
         columns={
             "id": "ID",
             "department": "部署",
-            "employee_name": "名前",
             "target_year": "年",
             "period": "時期",
             "tableau": "Tableau",
@@ -221,7 +233,6 @@ def fetch_records() -> pd.DataFrame:
         [
             "ID",
             "部署",
-            "名前",
             "年",
             "時期",
             "Tableau",
@@ -245,7 +256,6 @@ def fetch_detail_records() -> pd.DataFrame:
                     {
                         "ID": row["ID"],
                         "部署": row["部署"],
-                        "名前": row["名前"],
                         "年": row["年"],
                         "時期": row["時期"],
                         "コース": course,
@@ -255,7 +265,7 @@ def fetch_detail_records() -> pd.DataFrame:
                 )
     return pd.DataFrame(
         detail_rows,
-        columns=["ID", "部署", "名前", "年", "時期", "コース", "入力された情報", "登録日時"],
+        columns=["ID", "部署", "年", "時期", "コース", "入力された情報", "登録日時"],
     )
 
 
@@ -317,15 +327,14 @@ def style_sheet_as_table(ws, table_name: str) -> None:
     widths = {
         "A": 8,
         "B": 18,
-        "C": 18,
-        "D": 8,
-        "E": 10,
+        "C": 8,
+        "D": 10,
+        "E": 26,
         "F": 26,
-        "G": 26,
-        "H": 28,
-        "I": 26,
-        "J": 16,
-        "K": 20,
+        "G": 28,
+        "H": 26,
+        "I": 16,
+        "J": 20,
     }
     for col_idx in range(1, max_col + 1):
         col_letter = get_column_letter(col_idx)
@@ -408,32 +417,20 @@ def make_default_input_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "年": datetime.now().year,
-                "時期": None,
+                "年": row["年"],
+                "時期": row["時期"],
                 "Tableau": "",
                 "RPA": "",
                 "DBエンジニア": "",
                 "プロ": "",
             }
+            for row in FIXED_INPUT_ROWS
         ]
     )
 
 
-def parse_input_year(value: Any) -> int | None:
-    if value is None or pd.isna(value):
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        return int(float(text))
-    except ValueError:
-        return None
-
-
-def normalize_input_rows(input_df: pd.DataFrame) -> tuple[list[dict[str, Any]], list[str]]:
+def normalize_input_rows(input_df: pd.DataFrame) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    errors: list[str] = []
     for idx, row in input_df.iterrows():
         values = {COURSE_TO_DB[course]: clean_text(row.get(course, "")) for course in COURSE_COLUMNS}
         has_any_course_value = any(values.values())
@@ -441,34 +438,22 @@ def normalize_input_rows(input_df: pd.DataFrame) -> tuple[list[dict[str, Any]], 
             # コース入力がない行は登録しない。
             continue
 
-        target_year = parse_input_year(row.get("年"))
-        period = clean_text(row.get("時期", ""))
-
-        if target_year is None:
-            errors.append(f"{idx + 1}行目の年を入力してください。")
-        if not period:
-            errors.append(f"{idx + 1}行目の時期を選択してください。")
-        if target_year is None or not period:
-            continue
-
         rows.append(
             {
-                "target_year": target_year,
-                "period": period,
+                "target_year": int(row["年"]),
+                "period": clean_text(row["時期"]),
                 "record_label": f"明細{idx + 1}",
                 **values,
                 "memo": "",
             }
         )
-    return rows, errors
+    return rows
 
 
-def apply_filters(df: pd.DataFrame, department: str, employee_name: str, target_year: str, period: str) -> pd.DataFrame:
+def apply_filters(df: pd.DataFrame, department: str, target_year: str, period: str) -> pd.DataFrame:
     result = df.copy()
     if department:
         result = result[result["部署"].astype(str).str.contains(department, case=False, na=False)]
-    if employee_name:
-        result = result[result["名前"].astype(str).str.contains(employee_name, case=False, na=False)]
     if target_year:
         result = result[result["年"].astype(str) == target_year]
     if period:
@@ -482,124 +467,69 @@ def get_excel_bytes() -> bytes | None:
     return EXCEL_PATH.read_bytes()
 
 
-def reset_input_table_state() -> None:
-    """Reset only the course input table to its default single-row state."""
-    current_year = datetime.now().year
-    st.session_state.input_row_count = 1
-
-    # Clear all existing row widget values, including rows that are no longer displayed.
-    prefixes = (
-        "input_year_",
-        "input_period_",
-        "input_tableau_",
-        "input_rpa_",
-        "input_db_engineer_",
-        "input_pro_",
-    )
-    for key in list(st.session_state.keys()):
-        if key.startswith(prefixes):
-            del st.session_state[key]
-
-    # Set the first row back to the default values.
-    st.session_state.input_year_0 = current_year
-    st.session_state.input_period_0 = None
-    st.session_state.input_tableau_0 = ""
-    st.session_state.input_rpa_0 = ""
-    st.session_state.input_db_engineer_0 = ""
-    st.session_state.input_pro_0 = ""
-
-
 def page_input() -> None:
     st.subheader("入力")
-    st.caption("1人につき複数件を登録できます。各行が1件、年・時期・各コースをテーブル内で入力します。")
+    st.caption("部署を選択し、各年度・時期のコース別入力欄に入力してください。年・時期は固定表示です。")
 
-    if st.session_state.pop("reset_input_table_after_save", False):
-        reset_input_table_state()
+    if "input_reset_token" not in st.session_state:
+        st.session_state.input_reset_token = 0
 
-    success_message = st.session_state.pop("entry_success_message", "")
-    info_message = st.session_state.pop("entry_info_message", "")
-    if success_message:
-        st.success(success_message)
-    if info_message:
-        st.info(info_message)
-
-    current_year = datetime.now().year
-    if "input_row_count" not in st.session_state:
-        st.session_state.input_row_count = 1
-
-    # 以前のバージョンで年が空欄のまま残っている場合は、今年の年を表示する。
-    for row_no in range(int(st.session_state.input_row_count)):
-        year_key = f"input_year_{row_no}"
-        if st.session_state.get(year_key) in (None, "", "None"):
-            st.session_state[year_key] = current_year
+    reset_token = st.session_state.input_reset_token
+    if "last_success_message" in st.session_state:
+        st.success(st.session_state.pop("last_success_message"))
 
     with st.form("entry_form", clear_on_submit=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            department = st.text_input("部署", placeholder="例：IT / 人事 / 生産")
-        with col2:
-            employee_name = st.text_input("名前", placeholder="例：山田 太郎")
+        department = st.selectbox(
+            "部署",
+            DEPARTMENT_OPTIONS,
+            index=None,
+            placeholder="部署を選択してください",
+        )
 
         st.markdown("#### コース別入力テーブル")
-        st.caption("年は - / + で変更できます。時期は1回クリックで選択肢が開きます。")
+        st.caption("10行固定です。Tableau / RPA / DBエンジニア / プロ に入力してください。")
 
-        header_cols = st.columns([1, 1, 1.25, 1.25, 1.4, 1.25])
+        header_cols = st.columns([0.8, 0.8, 1.25, 1.25, 1.4, 1.25])
         headers = ["年", "時期", "Tableau", "RPA", "DBエンジニア", "プロ"]
         for col, header in zip(header_cols, headers):
             col.markdown(f"**{header}**")
 
         input_rows: list[dict[str, Any]] = []
-        for row_no in range(int(st.session_state.input_row_count)):
-            cols = st.columns([1, 1, 1.25, 1.25, 1.4, 1.25])
+        for row_no, fixed_row in enumerate(FIXED_INPUT_ROWS):
+            cols = st.columns([0.8, 0.8, 1.25, 1.25, 1.4, 1.25])
             with cols[0]:
-                target_year = st.number_input(
-                    f"年 {row_no + 1}",
-                    min_value=2000,
-                    max_value=2100,
-                    value=current_year,
-                    step=1,
-                    format="%d",
-                    label_visibility="collapsed",
-                    key=f"input_year_{row_no}",
-                )
+                st.markdown(f"{fixed_row['年']}")
             with cols[1]:
-                period = st.selectbox(
-                    f"時期 {row_no + 1}",
-                    PERIOD_OPTIONS,
-                    index=None,
-                    placeholder="選択",
-                    label_visibility="collapsed",
-                    key=f"input_period_{row_no}",
-                )
+                st.markdown(f"{fixed_row['時期']}")
             with cols[2]:
                 tableau = st.text_input(
                     f"Tableau {row_no + 1}",
                     label_visibility="collapsed",
-                    key=f"input_tableau_{row_no}",
+                    key=f"input_tableau_{reset_token}_{row_no}",
                 )
             with cols[3]:
                 rpa = st.text_input(
                     f"RPA {row_no + 1}",
                     label_visibility="collapsed",
-                    key=f"input_rpa_{row_no}",
+                    key=f"input_rpa_{reset_token}_{row_no}",
                 )
             with cols[4]:
                 db_engineer = st.text_input(
                     f"DBエンジニア {row_no + 1}",
                     label_visibility="collapsed",
-                    key=f"input_db_engineer_{row_no}",
+                    key=f"input_db_engineer_{reset_token}_{row_no}",
                 )
             with cols[5]:
                 pro = st.text_input(
                     f"プロ {row_no + 1}",
                     label_visibility="collapsed",
-                    key=f"input_pro_{row_no}",
+                    key=f"input_pro_{reset_token}_{row_no}",
                 )
 
             input_rows.append(
                 {
-                    "年": target_year,
-                    "時期": period,
+                    "年": fixed_row["年"],
+                    "時期": fixed_row["時期"],
                     "Tableau": tableau,
                     "RPA": rpa,
                     "DBエンジニア": db_engineer,
@@ -607,36 +537,24 @@ def page_input() -> None:
                 }
             )
 
-        add_row_clicked = st.form_submit_button("＋ 行を追加", type="secondary")
         submitted = st.form_submit_button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
-
-    if add_row_clicked:
-        st.session_state.input_row_count = int(st.session_state.input_row_count) + 1
-        st.rerun()
 
     edited_df = pd.DataFrame(input_rows)
 
     if submitted:
-        department = department.strip()
-        employee_name = employee_name.strip()
-        if not department or not employee_name:
-            st.error("部署と名前を入力してください。")
+        if not department:
+            st.error("部署を選択してください。")
             return
 
-        rows, errors = normalize_input_rows(edited_df)
-        if errors:
-            for error in errors:
-                st.error(error)
-            return
+        rows = normalize_input_rows(edited_df)
         if not rows:
             st.warning("登録対象の行がありません。Tableau / RPA / DBエンジニア / プロ のいずれかに入力してください。")
             return
 
-        saved_count = insert_records(department, employee_name, rows)
+        saved_count = insert_records(department, rows)
         excel_path = sync_excel_from_sqlite()
-        st.session_state.entry_success_message = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
-        st.session_state.entry_info_message = "テーブル入力をデフォルト状態に戻しました。必要に応じて次の入力を行ってください。"
-        st.session_state.reset_input_table_after_save = True
+        st.session_state.input_reset_token += 1
+        st.session_state.last_success_message = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
         st.rerun()
 
 
@@ -645,18 +563,17 @@ def page_summary() -> None:
     aggregate_df = fetch_records()
 
     with st.expander("絞り込み", expanded=True):
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            department = st.text_input("部署", key="filter_department")
+            department = st.selectbox("部署", [""] + DEPARTMENT_OPTIONS, key="filter_department")
         with col2:
-            employee_name = st.text_input("名前", key="filter_name")
-        with col3:
             year_options = [""] + sorted([str(x) for x in aggregate_df["年"].dropna().unique()], reverse=True) if not aggregate_df.empty else [""]
             target_year = st.selectbox("年", year_options, key="filter_year")
-        with col4:
-            period = st.selectbox("時期", [""] + PERIOD_OPTIONS, key="filter_period")
+        with col3:
+            period_options = [""] + sorted(set(PERIOD_OPTIONS + [str(x) for x in aggregate_df["時期"].dropna().unique()])) if not aggregate_df.empty else [""] + PERIOD_OPTIONS
+            period = st.selectbox("時期", period_options, key="filter_period")
 
-    filtered_df = apply_filters(aggregate_df, department, employee_name, target_year, period)
+    filtered_df = apply_filters(aggregate_df, department, target_year, period)
     detail_df = fetch_detail_records()
 
     c1, c2, c3 = st.columns(3)
