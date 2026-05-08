@@ -515,7 +515,7 @@ def page_input() -> None:
             if len(errors) > 20:
                 st.write(f"- ほか {len(errors) - 20} 件")
             return
-        saved_count = insert_records(department, clean_text(comment=""), rows)
+        saved_count = insert_records(department, "", rows)
         excel_path = sync_excel_from_sqlite()
         reset_input_widgets()
         st.session_state["entry_success_message"] = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
