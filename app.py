@@ -24,11 +24,9 @@ EXCEL_PATH = Path(os.getenv("EXCEL_PATH", DATA_DIR / "course_entries.xlsx"))
 EXPORT_LOCK = threading.Lock()
 DEPARTMENT_OPTIONS = ["A", "B", "C", "D", "E", "F", "G"]
 FIXED_INPUT_ROWS = [
-    {"年": 2026, "時期": "上期"}, {"年": 2026, "時期": "下期"},
+    {"年": 2026, "時期": "下期"},
     {"年": 2027, "時期": "上期"}, {"年": 2027, "時期": "下期"},
     {"年": 2028, "時期": "上期"}, {"年": 2028, "時期": "下期"},
-    {"年": 2029, "時期": "上期"}, {"年": 2029, "時期": "下期"},
-    {"年": 2030, "時期": "上期"}, {"年": 2030, "時期": "下期"},
 ]
 SYSTEM_EMPLOYEE_NAME = ""
 
@@ -44,18 +42,19 @@ def clean_text(value: Any) -> str:
     return str(value).strip()
 
 
-def parse_number(value: Any) -> float | None:
+def parse_number(value: Any) -> float | int | None:
+    """Convert table input to a number. Empty/None values are treated as 0."""
     if value is None:
-        return None
+        return 0
     try:
         if pd.isna(value):
-            return None
+            return 0
     except TypeError:
         pass
     if isinstance(value, str):
         value = value.strip()
         if value == "":
-            return None
+            return 0
         value = value.replace(",", "")
     try:
         number = float(value)
@@ -161,39 +160,6 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_deleted_course_records_original_id
             ON deleted_course_records(original_id)
         """)
-        
-        course_record_columns = {
-        "record_label": "TEXT DEFAULT ''",
-        "business_core": "REAL DEFAULT 0",
-        "pro": "REAL DEFAULT 0",
-        "data_engineer": "REAL DEFAULT 0",
-        "tableau": "REAL DEFAULT 0",
-        "rpa": "REAL DEFAULT 0",
-        "memo": "TEXT DEFAULT ''",
-        "created_by": "TEXT DEFAULT ''",
-    }
-
-    for column_name, column_definition in course_record_columns.items():
-        ensure_column_exists(conn, "course_records", column_name, column_definition)
-
-    deleted_record_columns = {
-        "original_id": "INTEGER DEFAULT 0",
-        "record_label": "TEXT DEFAULT ''",
-        "business_core": "REAL DEFAULT 0",
-        "pro": "REAL DEFAULT 0",
-        "data_engineer": "REAL DEFAULT 0",
-        "tableau": "REAL DEFAULT 0",
-        "rpa": "REAL DEFAULT 0",
-        "memo": "TEXT DEFAULT ''",
-        "created_by": "TEXT DEFAULT ''",
-        "deleted_by": "TEXT DEFAULT ''",
-        "delete_comment": "TEXT DEFAULT ''",
-        "deleted_at": "TEXT DEFAULT ''",
-    }
-
-    for column_name, column_definition in deleted_record_columns.items():
-        ensure_column_exists(conn, "deleted_course_records", column_name, column_definition)
-        
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -207,6 +173,36 @@ def init_db() -> None:
             )
         """)
 
+        course_record_columns = {
+            "record_label": "TEXT DEFAULT ''",
+            "business_core": "REAL DEFAULT 0",
+            "pro": "REAL DEFAULT 0",
+            "data_engineer": "REAL DEFAULT 0",
+            "tableau": "REAL DEFAULT 0",
+            "rpa": "REAL DEFAULT 0",
+            "memo": "TEXT DEFAULT ''",
+            "created_by": "TEXT DEFAULT ''",
+        }
+        for column_name, column_definition in course_record_columns.items():
+            ensure_column_exists(conn, "course_records", column_name, column_definition)
+
+        deleted_record_columns = {
+            "original_id": "INTEGER DEFAULT 0",
+            "record_label": "TEXT DEFAULT ''",
+            "business_core": "REAL DEFAULT 0",
+            "pro": "REAL DEFAULT 0",
+            "data_engineer": "REAL DEFAULT 0",
+            "tableau": "REAL DEFAULT 0",
+            "rpa": "REAL DEFAULT 0",
+            "memo": "TEXT DEFAULT ''",
+            "created_by": "TEXT DEFAULT ''",
+            "deleted_by": "TEXT DEFAULT ''",
+            "delete_comment": "TEXT DEFAULT ''",
+            "deleted_at": "TEXT DEFAULT ''",
+        }
+        for column_name, column_definition in deleted_record_columns.items():
+            ensure_column_exists(conn, "deleted_course_records", column_name, column_definition)
+
 
 def make_default_input_df() -> pd.DataFrame:
     rows = []
@@ -216,6 +212,21 @@ def make_default_input_df() -> pd.DataFrame:
             "ビジネスコア": 0, "プロ": 0, "データエンジニア": 0, "Tableau": 0, "RPA": 0,
         })
     return pd.DataFrame(rows)
+
+
+def sanitize_input_df(input_df: pd.DataFrame) -> pd.DataFrame:
+    """Keep fixed year/period rows and turn deleted numeric cells into 0."""
+    df = input_df.copy()
+    df = df.reindex(range(len(FIXED_INPUT_ROWS))).copy()
+    for idx, fixed in enumerate(FIXED_INPUT_ROWS):
+        df.at[idx, "年"] = fixed["年"]
+        df.at[idx, "時期"] = fixed["時期"]
+    for course in COURSE_COLUMNS:
+        if course not in df.columns:
+            df[course] = 0
+        df[course] = pd.to_numeric(df[course], errors="coerce").fillna(0)
+        df[course] = df[course].map(format_number_for_display)
+    return df[["年", "時期", *COURSE_COLUMNS]]
 
 
 def normalize_input_rows(input_df: pd.DataFrame, comment: str) -> tuple[list[dict[str, Any]], list[str]]:
@@ -342,9 +353,9 @@ def fetch_detail_records() -> pd.DataFrame:
             if value is not None:
                 detail_rows.append({
                     "ID": row["ID"], "部署": row["部署"], "年": row["年"], "時期": row["時期"],
-                    "コース": course, "入力された情報": value, "コメント": row["コメント"], "登録日時": row["登録日時"],
+                    "コース": course, "入力された情報": value, "対象者": row["コメント"], "登録日時": row["登録日時"],
                 })
-    return pd.DataFrame(detail_rows, columns=["ID", "部署", "年", "時期", "コース", "入力された情報", "コメント", "登録日時"])
+    return pd.DataFrame(detail_rows, columns=["ID", "部署", "年", "時期", "コース", "入力された情報", "対象者", "登録日時"])
 
 
 def fetch_deleted_records() -> pd.DataFrame:
@@ -410,7 +421,7 @@ def write_summary(ws, aggregate_df: pd.DataFrame, detail_df: pd.DataFrame, delet
     ws["A1"].font = Font(bold=True, size=16)
     summary_items = [
         ("登録中件数", int(len(aggregate_df))),
-        ("コース別明細件数", int(len(detail_df))),
+        ("コース別集計件数", int(len(detail_df))),
         ("削除履歴件数", int(len(deleted_df))),
         ("最終Excel更新日時", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     ]
@@ -453,7 +464,7 @@ def sync_excel_from_sqlite() -> Path:
         ws.title = "集計テーブル"
         write_dataframe(ws, aggregate_df)
         style_sheet_as_table(ws, "AggregateTable")
-        detail_ws = wb.create_sheet("コース別明細")
+        detail_ws = wb.create_sheet("コース別集計")
         write_dataframe(detail_ws, detail_df)
         style_sheet_as_table(detail_ws, "DetailTable")
         deleted_ws = wb.create_sheet("削除履歴")
@@ -481,14 +492,33 @@ def apply_filters(df: pd.DataFrame, department: str, target_year: str, period: s
 
 
 def reset_input_widgets() -> None:
+    st.session_state["input_editor_df"] = make_default_input_df()
     st.session_state["input_editor_version"] = int(st.session_state.get("input_editor_version", 0)) + 1
 
 
 def page_input() -> None:
     st.subheader("入力")
-    st.caption("部署を選択し、10行すべてのコース欄とコメントを入力して登録してください。")
+    st.caption(f"部署を選択し、{len(FIXED_INPUT_ROWS)}行のコース欄を数値で入力して登録してください。")
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stDataFrame"] div[role="gridcell"] {
+            font-size: 18px !important;
+        }
+        div[data-testid="stDataFrame"] div[role="columnheader"] {
+            font-size: 16px !important;
+        }
+        div[data-testid="stDataFrame"] input {
+            font-size: 18px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     if "input_editor_version" not in st.session_state:
         st.session_state["input_editor_version"] = 0
+    if "input_editor_df" not in st.session_state:
+        st.session_state["input_editor_df"] = make_default_input_df()
     if success_message := st.session_state.pop("entry_success_message", ""):
         st.success(success_message)
     if info_message := st.session_state.pop("entry_info_message", ""):
@@ -503,10 +533,10 @@ def page_input() -> None:
     )
 
     st.markdown("#### コース別入力テーブル")
-    st.caption("年・時期は固定表示です。ビジネスコア / プロ / データエンジニア / Tableau / RPA は数値で入力してください。")
+    st.caption("年・時期は固定表示です。数値欄を空にした場合は自動的に0へ戻します。")
     version = st.session_state["input_editor_version"]
     edited_df = st.data_editor(
-        make_default_input_df(),
+        st.session_state["input_editor_df"],
         key=f"course_input_editor_{version}",
         num_rows="fixed",
         use_container_width=True,
@@ -522,15 +552,16 @@ def page_input() -> None:
             "RPA": st.column_config.NumberColumn("RPA", min_value=0, step=1, format="%d"),
         },
     )
+    sanitized_df = sanitize_input_df(edited_df)
+    has_empty_numeric_cell = edited_df[COURSE_COLUMNS].isna().any().any()
+    st.session_state["input_editor_df"] = sanitized_df
+    if has_empty_numeric_cell:
+        st.session_state["input_editor_version"] = int(st.session_state.get("input_editor_version", 0)) + 1
+        st.rerun()
 
     st.caption("合計")
-    st.dataframe(make_input_total_df(edited_df), use_container_width=True, hide_index=True)
+    st.dataframe(make_input_total_df(sanitized_df), use_container_width=True, hide_index=True)
 
-    # comment = st.text_area(
-    #     "コメント",
-    #     key=f"entry_comment_{version}",
-    #     placeholder="登録内容に関するコメントを入力してください",
-    # )
     submitted = st.button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
 
     if submitted:
@@ -538,9 +569,9 @@ def page_input() -> None:
         if not department:
             st.error("部署を選択してください。")
             return
-        rows, errors = normalize_input_rows(edited_df, comment="")
+        rows, errors = normalize_input_rows(sanitized_df, comment="")
         if errors:
-            st.error("未入力または数値ではない項目があります。すべて数値で入力してから登録してください。")
+            st.error("数値ではない項目があります。すべて数値で入力してから登録してください。")
             for error in errors[:20]:
                 st.write(f"- {error}")
             if len(errors) > 20:
@@ -550,9 +581,9 @@ def page_input() -> None:
         excel_path = sync_excel_from_sqlite()
         reset_input_widgets()
         st.session_state["entry_success_message"] = f"{saved_count}件を登録しました。Excelにも保存しました: {excel_path}"
-        st.session_state["entry_info_message"] = "登録後、入力テーブルとコメント欄をデフォルトに戻しました。"
+        st.session_state["entry_info_message"] = "登録後、入力テーブルをデフォルトに戻しました。"
         st.rerun()
-        
+
 
 def page_summary() -> None:
     st.subheader("集計テーブル")
@@ -586,8 +617,8 @@ def page_summary() -> None:
 
 
 def page_detail() -> None:
-    st.subheader("コース別明細")
-    st.caption("Excelの「コース別明細」シートと同じ形式です。1コース1行で確認できます。")
+    st.subheader("コース別集計")
+    st.caption("Excelの「コース別集計」シートと同じ形式です。1コース1行で確認できます。")
     st.dataframe(fetch_detail_records(), use_container_width=True, hide_index=True)
 
 
@@ -653,7 +684,7 @@ def main() -> None:
         page_input()
     elif menu == "集計テーブル":
         page_summary()
-    # elif menu == "コース別明細":
+    # elif menu == "コース別集計":
     #     page_detail()
     else:
         page_admin()
