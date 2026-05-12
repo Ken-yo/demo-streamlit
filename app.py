@@ -492,8 +492,23 @@ def apply_filters(df: pd.DataFrame, department: str, target_year: str, period: s
 
 
 def reset_input_widgets() -> None:
-    st.session_state["input_editor_df"] = make_default_input_df()
     st.session_state["input_editor_version"] = int(st.session_state.get("input_editor_version", 0)) + 1
+
+
+def normalize_widget_number(key: str) -> None:
+    value = st.session_state.get(key, 0)
+    if value is None or value == "":
+        st.session_state[key] = 0
+        return
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        number = 0
+    st.session_state[key] = max(0, number)
+
+
+def input_widget_key(version: int, row_idx: int, course: str) -> str:
+    return f"course_value_{version}_{row_idx}_{COURSE_TO_DB[course]}"
 
 
 def page_input() -> None:
@@ -502,23 +517,32 @@ def page_input() -> None:
     st.markdown(
         """
         <style>
-        div[data-testid="stDataFrame"] div[role="gridcell"] {
-            font-size: 18px !important;
+        div[data-testid="stNumberInput"] input {
+            font-size: 20px !important;
+            font-weight: 600 !important;
+            min-height: 42px !important;
         }
-        div[data-testid="stDataFrame"] div[role="columnheader"] {
-            font-size: 16px !important;
+        .fixed-input-cell {
+            font-size: 18px;
+            font-weight: 700;
+            padding: 0.55rem 0.2rem;
+            min-height: 42px;
+            display: flex;
+            align-items: center;
         }
-        div[data-testid="stDataFrame"] input {
-            font-size: 18px !important;
+        .input-table-header {
+            font-size: 14px;
+            font-weight: 700;
+            color: #A9B4C0;
+            padding-bottom: 0.25rem;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
     if "input_editor_version" not in st.session_state:
         st.session_state["input_editor_version"] = 0
-    if "input_editor_df" not in st.session_state:
-        st.session_state["input_editor_df"] = make_default_input_df()
     if success_message := st.session_state.pop("entry_success_message", ""):
         st.success(success_message)
     if info_message := st.session_state.pop("entry_info_message", ""):
@@ -533,34 +557,42 @@ def page_input() -> None:
     )
 
     st.markdown("#### コース別入力テーブル")
-    st.caption("年・時期は固定表示です。数値欄を空にした場合は自動的に0へ戻します。")
-    version = st.session_state["input_editor_version"]
-    edited_df = st.data_editor(
-        st.session_state["input_editor_df"],
-        key=f"course_input_editor_{version}",
-        num_rows="fixed",
-        use_container_width=True,
-        hide_index=True,
-        disabled=["年", "時期"],
-        column_config={
-            "年": st.column_config.NumberColumn("年", format="%d"),
-            "時期": st.column_config.TextColumn("時期"),
-            "ビジネスコア": st.column_config.NumberColumn("ビジネスコア", min_value=0, step=1, format="%d"),
-            "プロ": st.column_config.NumberColumn("プロ", min_value=0, step=1, format="%d"),
-            "データエンジニア": st.column_config.NumberColumn("データエンジニア", min_value=0, step=1, format="%d"),
-            "Tableau": st.column_config.NumberColumn("Tableau", min_value=0, step=1, format="%d"),
-            "RPA": st.column_config.NumberColumn("RPA", min_value=0, step=1, format="%d"),
-        },
-    )
-    sanitized_df = sanitize_input_df(edited_df)
-    has_empty_numeric_cell = edited_df[COURSE_COLUMNS].isna().any().any()
-    st.session_state["input_editor_df"] = sanitized_df
-    if has_empty_numeric_cell:
-        st.session_state["input_editor_version"] = int(st.session_state.get("input_editor_version", 0)) + 1
-        st.rerun()
+    st.caption("年・時期は固定表示です。数値欄は0以上の整数で入力してください。Deleteなどで空になった場合も登録時は0として扱います。")
+
+    version = int(st.session_state["input_editor_version"])
+    header_cols = st.columns([0.9, 0.9, 1.4, 1.4, 1.6, 1.4, 1.4])
+    headers = ["年", "時期", *COURSE_COLUMNS]
+    for col, header in zip(header_cols, headers):
+        col.markdown(f'<div class="input-table-header">{header}</div>', unsafe_allow_html=True)
+
+    input_rows: list[dict[str, Any]] = []
+    for row_idx, fixed in enumerate(FIXED_INPUT_ROWS):
+        row_data: dict[str, Any] = {"年": fixed["年"], "時期": fixed["時期"]}
+        cols = st.columns([0.9, 0.9, 1.4, 1.4, 1.6, 1.4, 1.4])
+        cols[0].markdown(f'<div class="fixed-input-cell">{fixed["年"]}</div>', unsafe_allow_html=True)
+        cols[1].markdown(f'<div class="fixed-input-cell">{fixed["時期"]}</div>', unsafe_allow_html=True)
+
+        for course_idx, course in enumerate(COURSE_COLUMNS, start=2):
+            key = input_widget_key(version, row_idx, course)
+            if key not in st.session_state or st.session_state.get(key) is None:
+                st.session_state[key] = 0
+            value = cols[course_idx].number_input(
+                f"{fixed['年']} {fixed['時期']} {course}",
+                min_value=0,
+                step=1,
+                format="%d",
+                key=key,
+                label_visibility="collapsed",
+                on_change=normalize_widget_number,
+                args=(key,),
+            )
+            row_data[course] = 0 if value is None else int(value)
+        input_rows.append(row_data)
+
+    input_df = pd.DataFrame(input_rows, columns=["年", "時期", *COURSE_COLUMNS])
 
     st.caption("合計")
-    st.dataframe(make_input_total_df(sanitized_df), use_container_width=True, hide_index=True)
+    st.dataframe(make_input_total_df(input_df), use_container_width=True, hide_index=True)
 
     submitted = st.button("確定してSQLiteへ登録し、Excelへ保存", type="primary")
 
@@ -569,7 +601,7 @@ def page_input() -> None:
         if not department:
             st.error("部署を選択してください。")
             return
-        rows, errors = normalize_input_rows(sanitized_df, comment="")
+        rows, errors = normalize_input_rows(input_df, comment="")
         if errors:
             st.error("数値ではない項目があります。すべて数値で入力してから登録してください。")
             for error in errors[:20]:
