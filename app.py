@@ -22,7 +22,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "course_entries.db"))
 EXCEL_PATH = Path(os.getenv("EXCEL_PATH", DATA_DIR / "course_entries.xlsx"))
 EXPORT_LOCK = threading.Lock()
-DEPARTMENT_OPTIONS = ["A", "B", "C", "D", "E", "F", "G"]
+DEPARTMENT_OPTIONS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 FIXED_INPUT_ROWS = [
     {"年": 2026, "時期": "下期"},
     {"年": 2027, "時期": "上期"}, {"年": 2027, "時期": "下期"},
